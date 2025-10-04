@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -120,4 +121,35 @@ func (a *AccountCollection) UpdateIndex(ttl int, indexName string) error {
 	_, err := a.collection.Indexes().CreateOne(ctx, indexModel)
 	return err
 
+}
+
+func (a *AccountCollection) SearchByText(keyword string) ([]models.Account, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var result []models.Account
+	keyword = strings.ToLower(keyword)
+
+	pipeline := mongo.Pipeline{
+		{{"$match", bson.D{
+			{"$text", bson.D{
+				{"$search", keyword},
+			}},
+		}}},
+	}
+
+	cusor, err := a.collection.Aggregate(ctx, pipeline)
+	if err != nil {
+		return result, err
+	}
+
+	defer cusor.Close(ctx)
+	for cusor.Next(ctx) {
+		var account models.Account
+		if err := cusor.Decode(&account); err != nil {
+			return result, err
+		}
+		result = append(result, account)
+	}
+	
+	return result, nil
 }
