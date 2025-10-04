@@ -1,0 +1,19 @@
+server:
+  port: ${SERVER_PORT}
+
+database:
+  uri: ${DB_URI}
+  name: ${DB_NAME}
+
+jwt:
+  secret_key: ${SECRETKEY}
+  issuer: ${ISSUER}
+  jwt_access_token_expiration_time: 43200
+  jwt_refresh_token_expiration_time: 86400
+  jwt_aprroved_token_expiration_time: 900
+
+email:
+  host: ${EMAIL_HOST}
+  port: ${EMAIL_PORT}
+  user: ${EMAIL_USER}
+  pass: ${EMAIL_PASS}
