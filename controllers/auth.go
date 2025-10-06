@@ -72,6 +72,7 @@ func (auth *AuthController) Login(c *gin.Context) {
 			"$ne": deviceId,
 		},
 	}
+
 	opts := options.Find().SetSort(bson.D{{Key: "created_at", Value: 1}})
 	loginAccounts, _ := auth.sessionCollection.Find(ctx, filer, opts)
 

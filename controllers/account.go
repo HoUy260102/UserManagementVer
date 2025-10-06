@@ -3,6 +3,7 @@ package controllers
 import (
 	"UserManagementVer/collections"
 	"UserManagementVer/models"
+	"UserManagementVer/services"
 	"UserManagementVer/utils"
 	"context"
 	"errors"
@@ -30,20 +31,17 @@ const (
 )
 
 type CreateAccount struct {
-	Name      string    `json:"name,omitempty" validate:"required"`
-	Email     string    `json:"email,omitempty" validate:"required,email"`
-	Password  string    `json:"password,omitempty" validate:"required"`
-	Phone     string    `json:"phone,omitempty" validate:"required,phoneVn"`
-	Dob       time.Time `json:"dob,omitempty"`
-	CreatedBy string    `json:"created_by,omitempty" validate:"required"`
+	Name     string    `json:"name,omitempty" validate:"required"`
+	Email    string    `json:"email,omitempty" validate:"required,email"`
+	Password string    `json:"password,omitempty" validate:"required"`
+	Phone    string    `json:"phone,omitempty" validate:"required,phoneVn"`
+	Dob      time.Time `json:"dob,omitempty"`
 }
 
 type UpdateAccount struct {
-	Name      *string    `json:"name,omitempty" validate:"required"`
-	Password  *string    `json:"password,omitempty" validate:"required"`
-	Phone     *string    `json:"phone,omitempty" validate:"required,phoneVn"`
-	Dob       *time.Time `json:"dob,omitempty"`
-	UpdatedBy *string    `json:"updated_by,omitempty" validate:"required"`
+	Name  *string    `json:"name,omitempty" validate:"required"`
+	Phone *string    `json:"phone,omitempty" validate:"required,phoneVn"`
+	Dob   *time.Time `json:"dob,omitempty"`
 }
 
 type AccountResponse struct {
@@ -56,52 +54,80 @@ type AccountResponse struct {
 
 type AccountController struct {
 	accountCollection *collections.AccountCollection
+	jwtService        *services.JwtService
 }
 
-func NewAccountController(accountCollection *collections.AccountCollection) *AccountController {
+func NewAccountController(accountCollection *collections.AccountCollection, jwtService *services.JwtService) *AccountController {
 	return &AccountController{
 		accountCollection: accountCollection,
+		jwtService:        jwtService,
 	}
 }
 
 func (accountCon *AccountController) CreateAccount(c *gin.Context) {
-	var CreateAccount CreateAccount
-	if err := c.ShouldBindJSON(&CreateAccount); err != nil {
+	var createAccount CreateAccount
+
+	if err := c.ShouldBindJSON(&createAccount); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"status":  http.StatusBadRequest,
 			"message": err.Error(),
 		})
 		return
 	}
-	if err := utils.HandlerValidation(utils.Validator.Struct(CreateAccount)); len(err) > 0 {
+
+	if err := utils.HandlerValidation(utils.Validator.Struct(createAccount)); len(err) > 0 {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"status":  http.StatusBadRequest,
-			"message": err,
+			"message": "Lỗi định dạng: " + err,
 		})
 		return
 	}
+
+	authHeader := c.GetHeader("Authorization")
+	authHeader = strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+	jwtCustomClaims, err := accountCon.jwtService.ExtractCustomClaims(authHeader)
+
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"status":  http.StatusUnauthorized,
+			"message": err.Error(),
+		})
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, checkExisted := accountCon.accountCollection.Find(ctx, bson.M{"email": CreateAccount.Email})
+	_, checkExisted := accountCon.accountCollection.Find(ctx, bson.M{"email": createAccount.Email})
 
 	if !errors.Is(checkExisted, mongo.ErrNoDocuments) {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"status":  http.StatusBadRequest,
-			"message": checkExisted.Error(),
+			"message": "Email người dùng này đã tồn tại trong hệ thống",
+		})
+		return
+	}
+
+	createdByAccount, err := accountCon.accountCollection.Find(ctx, bson.M{
+		"email": jwtCustomClaims.Email,
+	})
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"status":  http.StatusUnauthorized,
+			"message": "Không tìm thấy thông tin người update",
 		})
 		return
 	}
 
 	CreateAccountModel := models.Account{
-		Name:      CreateAccount.Name,
-		Email:     CreateAccount.Email,
-		Password:  CreateAccount.Password,
-		Phone:     CreateAccount.Phone,
-		Dob:       CreateAccount.Dob,
-		CreatedBy: CreateAccount.CreatedBy,
+		Name:      createAccount.Name,
+		Email:     createAccount.Email,
+		Password:  createAccount.Password,
+		Phone:     createAccount.Phone,
+		Dob:       createAccount.Dob,
+		CreatedBy: createdByAccount.Id,
 	}
 
-	err := accountCon.accountCollection.Create(ctx, CreateAccountModel)
+	err = accountCon.accountCollection.Create(ctx, CreateAccountModel)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  http.StatusInternalServerError,
@@ -127,8 +153,31 @@ func (accountCon *AccountController) UpdateAccount(c *gin.Context) {
 		})
 		return
 	}
+	authHeader := c.GetHeader("Authorization")
+	authHeader = strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+	jwtCustomClaims, err := accountCon.jwtService.ExtractCustomClaims(authHeader)
+
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"status":  http.StatusUnauthorized,
+			"message": err.Error(),
+		})
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+
+	updatedByAccount, err := accountCon.accountCollection.Find(ctx, bson.M{
+		"email": jwtCustomClaims.Email,
+	})
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"status":  http.StatusUnauthorized,
+			"message": "Không tìm thấy thông tin người update",
+		})
+		return
+	}
 
 	oldAccount, err := accountCon.accountCollection.GetAccountById(ctx, objectId)
 	if errors.Is(err, mongo.ErrNoDocuments) {
@@ -154,7 +203,7 @@ func (accountCon *AccountController) UpdateAccount(c *gin.Context) {
 		"$set": bson.M{
 			"phone":      updateAccountRequest.Phone,
 			"dob":        updateAccountRequest.Dob,
-			"updated_by": updateAccountRequest.UpdatedBy,
+			"updated_by": updatedByAccount.Id,
 			"updated_at": time.Now(),
 			"name":       updateAccountRequest.Name,
 		},
@@ -203,24 +252,39 @@ func (accountCon *AccountController) FindAccountById(c *gin.Context) {
 }
 
 func (accountCon *AccountController) SoftDelete(c *gin.Context) {
-	mp := make(map[string]string)
-	if err := c.ShouldBindJSON(&mp); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"status":  http.StatusBadRequest,
+	id := c.Param("id")
+	objectId, _ := primitive.ObjectIDFromHex(id)
+
+	authHeader := c.GetHeader("Authorization")
+	authHeader = strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+	jwtCustomClaims, err := accountCon.jwtService.ExtractCustomClaims(authHeader)
+
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"status":  http.StatusUnauthorized,
 			"message": err.Error(),
 		})
 		return
 	}
-	id := mp["id"]
-	deleteBy := mp["deleted_by"]
-	objectId, _ := primitive.ObjectIDFromHex(id)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+
+	deletedByAccount, err := accountCon.accountCollection.Find(ctx, bson.M{
+		"email": jwtCustomClaims.Email,
+	})
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"status":  http.StatusUnauthorized,
+			"message": "Không tìm thấy thông tin người xóa",
+		})
+		return
+	}
 	existedAccount, checkExisted := accountCon.accountCollection.GetAccountById(ctx, objectId)
 	if errors.Is(checkExisted, mongo.ErrNoDocuments) {
 		c.JSON(http.StatusNotFound, gin.H{
 			"status":  http.StatusNotFound,
-			"message": "Không thấy tài khoản",
+			"message": "Không thấy tài khoản người bị xóa",
 		})
 		return
 	}
@@ -234,10 +298,10 @@ func (accountCon *AccountController) SoftDelete(c *gin.Context) {
 	update := bson.M{
 		"$set": bson.M{
 			"deleted_at": time.Now(),
-			"deleted_by": deleteBy,
+			"deleted_by": deletedByAccount.Id,
 		},
 	}
-	err := accountCon.accountCollection.Update(ctx, bson.M{"_id": objectId}, update)
+	err = accountCon.accountCollection.Update(ctx, bson.M{"_id": objectId}, update)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  http.StatusInternalServerError,
@@ -245,8 +309,8 @@ func (accountCon *AccountController) SoftDelete(c *gin.Context) {
 		})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"status":    http.StatusOK,
+	c.JSON(http.StatusNoContent, gin.H{
+		"status":    http.StatusNoContent,
 		"timestamp": time.Now(),
 		"message":   "Đã xóa tài khoản!",
 	})
@@ -346,34 +410,69 @@ func (accountCon *AccountController) SearchAccount(c *gin.Context) {
 		"data":      accountRes,
 	})
 }
+
 func (ac *AccountController) UploadImage(c *gin.Context) {
 	id := c.Param("id")
 	objectId, _ := primitive.ObjectIDFromHex(id)
 
-	// Lấy file từ request
-	file, err := c.FormFile("image")
+	form, err := c.MultipartForm()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No file uploaded"})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  http.StatusBadRequest,
+			"message": "Data không hợp lệ",
+		},
+		)
 		return
 	}
-	if file.Size < MinSize || file.Size > MaxSize {
-		c.JSON(400, gin.H{"error": "File phải từ 1MB đến 5MB"})
+
+	files := form.File["image"]
+
+	// Kiểm tra số lượng file
+	if len(files) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  http.StatusBadRequest,
+			"message": "Chưa có file được upload",
+		})
 		return
 	}
+
+	if len(files) > 1 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  http.StatusBadRequest,
+			"message": "Chỉ được phép tải 1 ảnh",
+		})
+		return
+	}
+	// Lấy file từ request
+	file := files[0]
+	//Kiểm tra kích thước file upload
+	//if file.Size < MinSize || file.Size > MaxSize {
+	//	c.JSON(400, gin.H{"error": "File phải từ 1MB đến 5MB"})
+	//	return
+	//}
 	//Check valid file
 	if err := utils.ChechValidFile(file); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  http.StatusBadRequest,
+			"message": err.Error(),
+		})
 		return
 	}
 
 	if err := utils.CheckValidMiMe(file); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  http.StatusBadRequest,
+			"message": err.Error(),
+		})
 		return
 	}
 
 	// Đảm bảo thư mục uploads tồn tại
 	if err := ensureUploadDir("uploads"); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Cannot create upload folder"})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status":  http.StatusInternalServerError,
+			"message": "Không thể khởi tạo được thư mục uploads",
+		})
 		return
 	}
 
@@ -387,8 +486,8 @@ func (ac *AccountController) UploadImage(c *gin.Context) {
 	// Lưu file vào server
 	if err := c.SaveUploadedFile(file, filePath); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"status": int(http.StatusInternalServerError),
-			"error":  "Cannot save file",
+			"status":  http.StatusInternalServerError,
+			"message": "Không thể lưu file",
 		})
 		return
 	}
@@ -401,14 +500,15 @@ func (ac *AccountController) UploadImage(c *gin.Context) {
 		"updated_at": time.Now(),
 	}}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"status": int(http.StatusInternalServerError),
-			"error":  "Cannot update DB",
+			"status":  http.StatusInternalServerError,
+			"message": "Không thể cập nhật ảnh vào DB",
 		})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Upload success",
+		"status":  http.StatusOK,
+		"message": "Upload thành công",
 		"path":    filePath,
 	})
 }
@@ -427,13 +527,13 @@ func (ac *AccountController) GetAvatar(c *gin.Context) {
 		return
 	}
 	fmt.Println(account.ImageUrl)
-	filepath := strings.ReplaceAll(account.ImageUrl, "\\", "/")
-	if _, err := os.Stat(filepath); os.IsNotExist(err) {
+	filePath := strings.ReplaceAll(account.ImageUrl, "\\", "/")
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		c.JSON(http.StatusNotFound, gin.H{"status": 404, "message": "Ảnh không tồn tại"})
 		return
 	}
 	// 2. Trả file ảnh về
-	c.File(filepath)
+	c.File(filePath)
 }
 
 func (ac *AccountController) UpdateTimeToLiveHardDelete(c *gin.Context) {
@@ -621,12 +721,6 @@ func (updateAccountRequest UpdateAccount) handlerUpdateAccountRequest(oldAccount
 	}
 	if updateAccountRequest.Dob == nil {
 		updateAccountRequest.Dob = &oldAccount.Dob
-	}
-	if updateAccountRequest.Password == nil {
-		updateAccountRequest.Password = &oldAccount.Password
-	} else {
-		hashPass, _ := utils.HashPassword(*updateAccountRequest.Password)
-		updateAccountRequest.Password = &hashPass
 	}
 	if updateAccountRequest.Phone == nil {
 		updateAccountRequest.Phone = &oldAccount.Phone
