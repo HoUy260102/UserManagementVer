@@ -4,10 +4,15 @@ import (
 	"UserManagementVer/services"
 	"log"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+)
+
+var (
+	unAvailableType = []string{"approved"}
 )
 
 func AuthorizeJWT(jwtServce *services.JwtService) gin.HandlerFunc {
@@ -23,10 +28,18 @@ func AuthorizeJWT(jwtServce *services.JwtService) gin.HandlerFunc {
 			return
 		}
 		token, err := jwtServce.ValidateToken(authHeader)
-
+		tokenClaims, _ := jwtServce.ExtractCustomClaims(token.Raw)
 		if token.Valid {
 			claims := token.Claims.(jwt.Claims)
 			log.Println(claims)
+			if slices.Contains(unAvailableType, tokenClaims.Type) {
+				c.JSON(http.StatusUnauthorized, gin.H{
+					"status":  http.StatusUnauthorized,
+					"message": "Không có quyền truy cập",
+				})
+				c.Abort()
+				return
+			}
 			c.Next()
 		} else {
 			log.Println(err)

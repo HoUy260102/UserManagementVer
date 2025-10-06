@@ -19,14 +19,16 @@ func NewJwtService(secretKey string, issuer string) *JwtService {
 
 type JwtCustomClaim struct {
 	Email string
+	Type  string
 	Role  string
 	jwt.RegisteredClaims
 }
 
-func (j *JwtService) GenerateJwt(email string, duration int) (string, *JwtCustomClaim, error) {
+func (j *JwtService) GenerateJwt(email string, duration int, typeToken string) (string, *JwtCustomClaim, error) {
 	tokenId, _ := uuid.NewRandom()
 	claims := &JwtCustomClaim{
 		Email: email,
+		Type:  typeToken,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ID:        tokenId.String(),
 			Subject:   email,

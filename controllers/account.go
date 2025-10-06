@@ -6,6 +6,7 @@ import (
 	"UserManagementVer/services"
 	"UserManagementVer/utils"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -146,13 +147,17 @@ func (accountCon *AccountController) UpdateAccount(c *gin.Context) {
 	var updateAccountRequest UpdateAccount
 	id := c.Param("id")
 	objectId, _ := primitive.ObjectIDFromHex(id)
-	if err := c.ShouldBindJSON(&updateAccountRequest); err != nil {
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(&updateAccountRequest); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"status":  http.StatusBadRequest,
 			"message": err.Error(),
 		})
 		return
 	}
+
 	authHeader := c.GetHeader("Authorization")
 	authHeader = strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
 	jwtCustomClaims, err := accountCon.jwtService.ExtractCustomClaims(authHeader)
@@ -232,7 +237,7 @@ func (accountCon *AccountController) FindAccountById(c *gin.Context) {
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		c.JSON(http.StatusNotFound, gin.H{
 			"status":  http.StatusNotFound,
-			"message": err.Error(),
+			"message": "Không tìm thấy được account",
 		})
 		return
 	}
@@ -414,14 +419,12 @@ func (accountCon *AccountController) SearchAccount(c *gin.Context) {
 func (ac *AccountController) UploadImage(c *gin.Context) {
 	id := c.Param("id")
 	objectId, _ := primitive.ObjectIDFromHex(id)
-
 	form, err := c.MultipartForm()
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"status":  http.StatusBadRequest,
 			"message": "Data không hợp lệ",
-		},
-		)
+		})
 		return
 	}
 
@@ -450,6 +453,7 @@ func (ac *AccountController) UploadImage(c *gin.Context) {
 	//	c.JSON(400, gin.H{"error": "File phải từ 1MB đến 5MB"})
 	//	return
 	//}
+
 	//Check valid file
 	if err := utils.ChechValidFile(file); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -529,7 +533,10 @@ func (ac *AccountController) GetAvatar(c *gin.Context) {
 	fmt.Println(account.ImageUrl)
 	filePath := strings.ReplaceAll(account.ImageUrl, "\\", "/")
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		c.JSON(http.StatusNotFound, gin.H{"status": 404, "message": "Ảnh không tồn tại"})
+		c.JSON(http.StatusNotFound, gin.H{
+			"status":  http.StatusNotFound,
+			"message": "Ảnh không tồn tại",
+		})
 		return
 	}
 	// 2. Trả file ảnh về
