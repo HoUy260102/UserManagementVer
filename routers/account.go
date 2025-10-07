@@ -24,10 +24,11 @@ func (accountRouter *AccountRouter) RegisterRoutes(router *gin.RouterGroup, jwtS
 		accountRou.PATCH("/:id", middlewares.AuthorizeJWT(jwtService), accountRouter.accountController.UpdateAccount)
 		accountRou.PATCH("/:id/restore", middlewares.AuthorizeJWT(jwtService), accountRouter.accountController.RestoreAccount)
 		accountRou.PATCH("/:id/soft-delete", middlewares.AuthorizeJWT(jwtService), accountRouter.accountController.SoftDelete)
-		accountRou.GET("/update", middlewares.AuthorizeJWT(jwtService), accountRouter.accountController.SearchAccount)
+		accountRou.GET("/search", middlewares.AuthorizeJWT(jwtService), accountRouter.accountController.SearchAccount)
 		accountRou.POST("/:id/update-avatar", middlewares.AuthorizeJWT(jwtService), accountRouter.accountController.UploadImage)
 		accountRou.GET("/:id/avatar", middlewares.AuthorizeJWT(jwtService), accountRouter.accountController.GetAvatar)
 		accountRou.PATCH("/time-to-live", middlewares.AuthorizeJWT(jwtService), accountRouter.accountController.UpdateTimeToLiveHardDelete)
 		accountRou.GET("/export/excel", middlewares.AuthorizeJWT(jwtService), accountRouter.accountController.DownloadAccountsExcel)
+		accountRou.POST("/:id/forgot-password", middlewares.AuthorizeJWT(jwtService), accountRouter.accountController.RestorePassword)
 	}
 }

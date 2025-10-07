@@ -53,6 +53,12 @@ type AccountResponse struct {
 	ImgUrl string    `json:"img_url,omitempty"`
 }
 
+type PasswordUpdateRequest struct {
+	OldPassword     string `json:"old_password"`
+	NewPassword     string `json:"new_password"`
+	ConfirmPassword string `json:"confirm_password"`
+}
+
 type AccountController struct {
 	accountCollection *collections.AccountCollection
 	jwtService        *services.JwtService
@@ -712,6 +718,100 @@ func (ac *AccountController) DownloadAccountsExcel(c *gin.Context) {
 		return
 	}
 
+}
+
+func (a *AccountController) RestorePassword(c *gin.Context) {
+	id := c.Param("id")
+	obejctId, _ := primitive.ObjectIDFromHex(id)
+	var passwordUpdateRequest PasswordUpdateRequest
+	if err := c.ShouldBindJSON(&passwordUpdateRequest); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  http.StatusBadRequest,
+			"message": err.Error(),
+		})
+		return
+	}
+	authHeader := c.GetHeader("Authorization")
+	authHeader = strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+	jwtCustomClaims, err := a.jwtService.ExtractCustomClaims(authHeader)
+
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"status":  http.StatusUnauthorized,
+			"message": err.Error(),
+		})
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	updatedByAccount, err := a.accountCollection.Find(ctx, bson.M{
+		"email": jwtCustomClaims.Email,
+	})
+
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"status":  http.StatusUnauthorized,
+			"message": "Không tìm thấy thông tin người update",
+		})
+		return
+	}
+
+	existsAccout, checkExisted := a.accountCollection.GetAccountById(ctx, obejctId)
+	if errors.Is(checkExisted, mongo.ErrNoDocuments) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  http.StatusBadRequest,
+			"message": "Tài khoản không tồn tại",
+		})
+		return
+	}
+
+	if !utils.CheckPassword(existsAccout.Password, passwordUpdateRequest.OldPassword) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  http.StatusBadRequest,
+			"message": "Mật khẩu cũ không đúng",
+		})
+		return
+	}
+
+	if passwordUpdateRequest.ConfirmPassword != passwordUpdateRequest.NewPassword {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  http.StatusBadRequest,
+			"message": "Mật khẩu mới và xác nhận mật khẩu không khớp",
+		})
+		return
+	}
+
+	if utils.CheckPassword(existsAccout.Password, passwordUpdateRequest.NewPassword) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  http.StatusBadRequest,
+			"message": "Mật khẩu mới trùng mật khẩu cũ",
+		})
+		return
+	}
+
+	hashPass, _ := utils.HashPassword(passwordUpdateRequest.NewPassword)
+	err = a.accountCollection.Update(ctx, bson.M{
+		"_id": obejctId,
+	}, bson.M{
+		"$set": bson.M{
+			"password":   hashPass,
+			"updated_at": time.Now(),
+			"updated_by": updatedByAccount.Id,
+		},
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status":  http.StatusInternalServerError,
+			"message": err.Error(),
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"status":    http.StatusOK,
+		"timestamp": time.Now(),
+		"message":   "Đôi thành công",
+	})
 }
 
 func ensureUploadDir(fileName string) error {
