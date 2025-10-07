@@ -150,6 +150,6 @@ func (a *AccountCollection) SearchByText(keyword string) ([]models.Account, erro
 		}
 		result = append(result, account)
 	}
-	
+
 	return result, nil
 }

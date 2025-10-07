@@ -72,6 +72,7 @@ func (auth *AuthController) Login(c *gin.Context) {
 			"$ne": deviceId,
 		},
 	}
+
 	opts := options.Find().SetSort(bson.D{{Key: "created_at", Value: 1}})
 	loginAccounts, _ := auth.sessionCollection.Find(ctx, filer, opts)
 
@@ -80,7 +81,7 @@ func (auth *AuthController) Login(c *gin.Context) {
 		//Gửi mail
 		oldestAccount, _ := auth.accountCollection.GetAccountById(ctx, loginAccounts[0].UserId)
 		auth.emailService.SendNewDeviceAlert(oldestAccount.Email, deviceId, time.Now().Format("2006-01-02"))
-		approvedToken, _, _ := auth.jwtService.GenerateJwt(account.Email, configs.AppConfig.Jwt.JwtAprrovedTokenExpirationTime)
+		approvedToken, _, _ := auth.jwtService.GenerateJwt(account.Email, configs.AppConfig.Jwt.JwtAprrovedTokenExpirationTime, "approved")
 
 		_, err := auth.sessionCollection.FindAndUpdate(ctx, models.Session{
 			ExpiresAt:     time.Time{},
@@ -108,7 +109,7 @@ func (auth *AuthController) Login(c *gin.Context) {
 		return
 	}
 
-	accessToken, accessTokenClaims, err := auth.jwtService.GenerateJwt(account.Email, configs.AppConfig.Jwt.JwtAccessTokenExpirationTime)
+	accessToken, accessTokenClaims, err := auth.jwtService.GenerateJwt(account.Email, configs.AppConfig.Jwt.JwtAccessTokenExpirationTime, "access")
 	if accessToken == "" || err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  int(http.StatusInternalServerError),
@@ -117,7 +118,7 @@ func (auth *AuthController) Login(c *gin.Context) {
 		return
 	}
 
-	refreshToken, refreshTokenClaims, err := auth.jwtService.GenerateJwt(account.Email, configs.AppConfig.Jwt.JwtRefreshTokenExpirationTime)
+	refreshToken, refreshTokenClaims, err := auth.jwtService.GenerateJwt(account.Email, configs.AppConfig.Jwt.JwtRefreshTokenExpirationTime, "refresh")
 	if refreshToken == "" || err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  int(http.StatusInternalServerError),
@@ -205,7 +206,7 @@ func (auth *AuthController) ConfirmLogin(c *gin.Context) {
 		}
 		oldestAccount := sessions[0]
 
-		refreshToken, refreshTokenClaims, err := auth.jwtService.GenerateJwt(approvedClaims.Email, configs.AppConfig.Jwt.JwtRefreshTokenExpirationTime)
+		refreshToken, refreshTokenClaims, err := auth.jwtService.GenerateJwt(approvedClaims.Email, configs.AppConfig.Jwt.JwtRefreshTokenExpirationTime, "refresh")
 
 		if refreshToken == "" || err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -245,7 +246,7 @@ func (auth *AuthController) ConfirmLogin(c *gin.Context) {
 			})
 			return
 		}
-		accessToken, accessTokenClaims, errJwt := auth.jwtService.GenerateJwt(approvedClaims.Email, configs.AppConfig.Jwt.JwtAccessTokenExpirationTime)
+		accessToken, accessTokenClaims, errJwt := auth.jwtService.GenerateJwt(approvedClaims.Email, configs.AppConfig.Jwt.JwtAccessTokenExpirationTime, "access")
 		if accessToken == "" || errJwt != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"status":  int(http.StatusInternalServerError),
