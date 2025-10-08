@@ -15,9 +15,9 @@ type Account struct {
 	Dob       time.Time          `bson:"dob,omitempty"`
 	ImageUrl  string             `bson:"image_url,omitempty"`
 	CreatedAt time.Time          `bson:"created_at,omitempty"`
-	CreatedBy string             `bson:"created_by,omitempty"`
+	CreatedBy primitive.ObjectID `bson:"created_by,omitempty"`
 	UpdatedAt time.Time          `bson:"updated_at,omitempty"`
-	UpdatedBy string             `bson:"updated_by,omitempty"`
+	UpdatedBy primitive.ObjectID `bson:"updated_by,omitempty"`
 	DeletedAt time.Time          `bson:"deleted_at,omitempty"`
-	DeletedBy string             `bson:"deleted_by,omitempty"`
+	DeletedBy primitive.ObjectID `bson:"deleted_by,omitempty"`
 }
