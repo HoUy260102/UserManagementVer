@@ -236,9 +236,10 @@ func (accountCon *AccountController) UpdateAccount(c *gin.Context) {
 
 func (accountCon *AccountController) FindAccountById(c *gin.Context) {
 	id := c.Param("id")
-	objectId, _ := primitive.ObjectIDFromHex(id)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 	defer cancel()
+
+	objectId, _ := primitive.ObjectIDFromHex(id)
 	accountRe, err := accountCon.accountCollection.GetAccountById(ctx, objectId)
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		c.JSON(http.StatusNotFound, gin.H{
@@ -260,6 +261,51 @@ func (accountCon *AccountController) FindAccountById(c *gin.Context) {
 		"message":   "Tìm thấy!",
 		"data":      accountRe,
 	})
+}
+
+func (accountCon *AccountController) MyDetails(c *gin.Context) {
+	authHeader := c.GetHeader("Authorization")
+	authHeader = strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+	jwtCustomClaims, err := accountCon.jwtService.ExtractCustomClaims(authHeader)
+
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"status":  http.StatusUnauthorized,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	existedAccount, checkExist := accountCon.accountCollection.Find(ctx, bson.M{
+		"email": jwtCustomClaims.Email,
+	})
+
+	if checkExist != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"status":  http.StatusNotFound,
+				"message": "Không tìm thấy tài khoản",
+			})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":    http.StatusOK,
+		"timestamp": time.Now(),
+		"message":   "Thành công",
+		"data": bson.M{
+			"name":    existedAccount.Name,
+			"email":   existedAccount.Email,
+			"phone":   existedAccount.Phone,
+			"dob":     existedAccount.Dob,
+			"img_url": existedAccount.ImageUrl,
+		},
+	})
+
 }
 
 func (accountCon *AccountController) SoftDelete(c *gin.Context) {

@@ -2,40 +2,56 @@ package middlewares
 
 import (
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/khaaleoo/gin-rate-limiter/core"
+	"golang.org/x/time/rate"
 )
+
+type Client struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
+}
+
+var (
+	mu      sync.Mutex
+	clients = make(map[string]*Client)
+)
+
+func getClientIp(c *gin.Context) string {
+	ip := c.ClientIP()
+	if ip == "" {
+		ip = c.Request.RemoteAddr
+	}
+	return ip
+}
+
+func getRateLimiter(ip string) *rate.Limiter {
+	mu.Lock()
+	defer mu.Unlock()
+	client, exists := clients[ip]
+	if !exists {
+		limiter := rate.NewLimiter(5, 10)
+		clients[ip] = &Client{limiter, time.Now()}
+		client = clients[ip]
+	}
+	client.lastSeen = time.Now()
+	return client.limiter
+}
 
 func NewRateLimiterMiddleware() gin.HandlerFunc {
 	// Cấu hình rate limiter
-	rateLimiterOption := core.RateLimiterOption{
-		Limit: 2,               // số request tối đa mỗi window
-		Burst: 5,               // số request được phép gửi ngay lập tức
-		Len:   1 * time.Second, // window 1 giây
-	}
-
-	// Tạo middleware từ thư viện
-	rateLimiterMiddleware := core.RequireRateLimiter(core.RateLimiter{
-		RateLimiterType: core.IPRateLimiter, // áp dụng theo IP
-		Key:             "iplimiter_maximum_requests_for_ip_test",
-		Option:          rateLimiterOption,
-	})
-
 	return func(c *gin.Context) {
-		// Gọi middleware của thư viện
-		rateLimiterMiddleware(c)
-
-		// Nếu request bị chặn, thư viện thường gọi c.Abort(), nên không cần c.Next()
-		if c.IsAborted() {
-			c.JSON(http.StatusTooManyRequests, gin.H{
+		ip := getClientIp(c)
+		limiter := getRateLimiter(ip)
+		if !limiter.Allow() {
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
 				"status":  http.StatusTooManyRequests,
-				"message": "Quá nhiều request",
+				"message": "Quá nhiều request, hãy thử lại",
 			})
+			return
 		}
-
-		// Nếu được phép, tiếp tục tới handler
 		c.Next()
 	}
 }
