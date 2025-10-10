@@ -16,12 +16,12 @@ import (
 )
 
 type AccountCollection struct {
-	collection *mongo.Collection
+	Collection *mongo.Collection
 }
 
 func NewAccountCollection(collection *mongo.Collection) *AccountCollection {
 	return &AccountCollection{
-		collection: collection,
+		Collection: collection,
 	}
 }
 
@@ -34,7 +34,7 @@ func (a *AccountCollection) Create(ctx context.Context, account models.Account) 
 	if err != nil {
 		return err
 	}
-	_, err = a.collection.InsertOne(ctx, account)
+	_, err = a.Collection.InsertOne(ctx, account)
 	return err
 }
 
@@ -45,7 +45,7 @@ func (a *AccountCollection) GetAccountById(ctx context.Context, objectId primiti
 		err     error
 	)
 	fmt.Println(objectId.Hex())
-	err = a.collection.FindOne(ctx, bson.M{"_id": objectId}).Decode(&account)
+	err = a.Collection.FindOne(ctx, bson.M{"_id": objectId}).Decode(&account)
 	if err != nil {
 		return account, err
 	}
@@ -54,7 +54,7 @@ func (a *AccountCollection) GetAccountById(ctx context.Context, objectId primiti
 
 func (a *AccountCollection) Find(ctx context.Context, filter bson.M) (models.Account, error) {
 	var account models.Account
-	err := a.collection.FindOne(ctx, filter).Decode(&account)
+	err := a.Collection.FindOne(ctx, filter).Decode(&account)
 	if err != nil {
 		return models.Account{}, err
 	}
@@ -63,7 +63,7 @@ func (a *AccountCollection) Find(ctx context.Context, filter bson.M) (models.Acc
 
 func (a *AccountCollection) FindAll(ctx context.Context, filter bson.M) ([]models.Account, error) {
 	var accounts []models.Account
-	cursor, err := a.collection.Find(ctx, filter)
+	cursor, err := a.Collection.Find(ctx, filter)
 	if err != nil {
 		return accounts, err
 	}
@@ -75,7 +75,7 @@ func (a *AccountCollection) FindAll(ctx context.Context, filter bson.M) ([]model
 }
 
 func (a *AccountCollection) Update(ctx context.Context, filter bson.M, update bson.M) error {
-	res, err := a.collection.UpdateOne(ctx, filter, update)
+	res, err := a.Collection.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return err
 	}
@@ -89,7 +89,7 @@ func (a *AccountCollection) DeleteIndex(indexName string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cursor, _ := a.collection.Indexes().List(ctx)
+	cursor, _ := a.Collection.Indexes().List(ctx)
 
 	for cursor.Next(ctx) {
 		var indexInfo map[string]interface{}
@@ -100,7 +100,7 @@ func (a *AccountCollection) DeleteIndex(indexName string) {
 		// So sánh tên index
 		if name, ok := indexInfo["name"].(string); ok && name == indexName {
 			fmt.Println("Delete successful")
-			_, err := a.collection.Indexes().DropOne(ctx, indexName) // tên mặc định
+			_, err := a.Collection.Indexes().DropOne(ctx, indexName) // tên mặc định
 			if err != nil {
 				return
 			}
@@ -118,7 +118,7 @@ func (a *AccountCollection) UpdateIndex(ttl int, indexName string) error {
 		Options: options.Index().SetExpireAfterSeconds(int32(ttl*24*60) * 60), // TTL mới
 	}
 
-	_, err := a.collection.Indexes().CreateOne(ctx, indexModel)
+	_, err := a.Collection.Indexes().CreateOne(ctx, indexModel)
 	return err
 
 }
@@ -137,7 +137,7 @@ func (a *AccountCollection) SearchByText(keyword string) ([]models.Account, erro
 		}}},
 	}
 
-	cusor, err := a.collection.Aggregate(ctx, pipeline)
+	cusor, err := a.Collection.Aggregate(ctx, pipeline)
 	if err != nil {
 		return result, err
 	}

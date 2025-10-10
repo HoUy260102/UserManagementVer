@@ -1,6 +1,7 @@
 package services
 
 import (
+	"UserManagementVer/utils"
 	"fmt"
 	"time"
 
@@ -13,8 +14,11 @@ type JwtService struct {
 	Issuer    string
 }
 
-func NewJwtService(secretKey string, issuer string) *JwtService {
-	return &JwtService{SecretKey: secretKey, Issuer: issuer}
+func NewJwtService() *JwtService {
+	return &JwtService{
+		SecretKey: utils.GetEnv("SECRET_KEY", ""),
+		Issuer:    utils.GetEnv("ISSUER", ""),
+	}
 }
 
 type JwtCustomClaim struct {
@@ -57,7 +61,7 @@ func (j *JwtService) ExtractCustomClaims(tokenStr string) (*JwtCustomClaim, erro
 		return claims, nil
 	}
 
-	return nil, fmt.Errorf("invalid token")
+	return nil, fmt.Errorf("Token không hợp lệ")
 }
 
 func (j *JwtService) ValidateToken(tokenString string) (*jwt.Token, error) {

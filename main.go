@@ -15,8 +15,9 @@ import (
 func main() {
 	configs.LoadFileConfig()
 	Db := db.ConnectMongo(configs.AppConfig.Database.URI, configs.AppConfig.Database.Name)
+	rdb := configs.NewRedisClient()
 	r := gin.Default()
 	v1 := r.Group("/api/v1")
-	routers.RegisterRouters(Db, v1)
+	routers.RegisterRouters(Db, v1, rdb)
 	r.Run(fmt.Sprintf(":%d", configs.AppConfig.Server.Port))
 }

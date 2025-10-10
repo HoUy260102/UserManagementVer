@@ -15,10 +15,10 @@ func NewAuthRouter(authController *controllers.AuthController) *AuthRouter {
 	return &AuthRouter{authController: authController}
 }
 
-func (authRouter *AuthRouter) Register(router *gin.RouterGroup) {
+func (authRouter *AuthRouter) Register(router *gin.RouterGroup, rateLimit *middlewares.RateLimit) {
 	authRou := router.Group("/auth")
 	{
-		authRou.POST("/login", middlewares.NewRateLimiterMiddleware(), authRouter.authController.Login)
+		authRou.POST("/login", rateLimit.NewRateLimiterMiddleware(), authRouter.authController.Login)
 		authRou.GET("/sessions", authRouter.authController.ConfirmLogin)
 	}
 }

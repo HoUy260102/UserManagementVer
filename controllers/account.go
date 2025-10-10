@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"net/http"
 	"os"
@@ -18,6 +19,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cloudinary/cloudinary-go/v2"
+	"github.com/cloudinary/cloudinary-go/v2/api/uploader"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/xuri/excelize/v2"
@@ -32,11 +35,11 @@ const (
 )
 
 type CreateAccount struct {
-	Name     string    `json:"name,omitempty" validate:"required"`
-	Email    string    `json:"email,omitempty" validate:"required,email"`
-	Password string    `json:"password,omitempty" validate:"required"`
-	Phone    string    `json:"phone,omitempty" validate:"required,phoneVn"`
-	Dob      time.Time `json:"dob,omitempty"`
+	Name     string `json:"name,omitempty" validate:"required"`
+	Email    string `json:"email,omitempty" validate:"required,email"`
+	Password string `json:"password,omitempty" validate:"required"`
+	Phone    string `json:"phone,omitempty"`
+	Dob      string `json:"dob,omitempty"`
 }
 
 type UpdateAccount struct {
@@ -73,7 +76,6 @@ func NewAccountController(accountCollection *collections.AccountCollection, jwtS
 
 func (accountCon *AccountController) CreateAccount(c *gin.Context) {
 	var createAccount CreateAccount
-
 	if err := c.ShouldBindJSON(&createAccount); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"status":  http.StatusBadRequest,
@@ -86,6 +88,15 @@ func (accountCon *AccountController) CreateAccount(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"status":  http.StatusBadRequest,
 			"message": "Lỗi định dạng: " + err,
+		})
+		return
+	}
+
+	dob, err := time.Parse("2006-01-02", createAccount.Dob)
+	if err != nil && createAccount.Dob != "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  http.StatusBadRequest,
+			"message": "Ngày sinh phải theo định dạng yyyy-mm-dd",
 		})
 		return
 	}
@@ -117,6 +128,7 @@ func (accountCon *AccountController) CreateAccount(c *gin.Context) {
 	createdByAccount, err := accountCon.accountCollection.Find(ctx, bson.M{
 		"email": jwtCustomClaims.Email,
 	})
+
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"status":  http.StatusUnauthorized,
@@ -130,7 +142,7 @@ func (accountCon *AccountController) CreateAccount(c *gin.Context) {
 		Email:     createAccount.Email,
 		Password:  createAccount.Password,
 		Phone:     createAccount.Phone,
-		Dob:       createAccount.Dob,
+		Dob:       dob,
 		CreatedBy: createdByAccount.Id,
 	}
 
@@ -157,9 +169,12 @@ func (accountCon *AccountController) UpdateAccount(c *gin.Context) {
 	decoder.DisallowUnknownFields()
 
 	if err := decoder.Decode(&updateAccountRequest); err != nil {
+		firstIndex := strings.Index(err.Error(), "\"")
+		lastIndex := strings.LastIndex(err.Error(), "\"")
+		fieldError := err.Error()[firstIndex+1 : lastIndex]
 		c.JSON(http.StatusBadRequest, gin.H{
 			"status":  http.StatusBadRequest,
-			"message": err.Error(),
+			"message": fmt.Sprintf("Field này: %s không được phép update", fieldError),
 		})
 		return
 	}
@@ -182,6 +197,7 @@ func (accountCon *AccountController) UpdateAccount(c *gin.Context) {
 	updatedByAccount, err := accountCon.accountCollection.Find(ctx, bson.M{
 		"email": jwtCustomClaims.Email,
 	})
+
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"status":  http.StatusUnauthorized,
@@ -554,6 +570,142 @@ func (ac *AccountController) UploadImage(c *gin.Context) {
 	if err := ac.accountCollection.Update(ctx, bson.M{"_id": objectId}, bson.M{"$set": bson.M{
 		"image_url":  filePath,
 		"updated_at": time.Now(),
+	}}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status":  http.StatusInternalServerError,
+			"message": "Không thể cập nhật ảnh vào DB",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  http.StatusOK,
+		"message": "Upload thành công",
+		"path":    filePath,
+	})
+}
+
+func (ac *AccountController) UploadImageS3(c *gin.Context) {
+	id := c.Param("id")
+	objectId, _ := primitive.ObjectIDFromHex(id)
+	form, err := c.MultipartForm()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  http.StatusBadRequest,
+			"message": "Data không hợp lệ",
+		})
+		return
+	}
+
+	files := form.File["image"]
+
+	// Kiểm tra số lượng file
+	if len(files) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  http.StatusBadRequest,
+			"message": "Chưa có file được upload",
+		})
+		return
+	}
+
+	if len(files) > 1 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  http.StatusBadRequest,
+			"message": "Chỉ được phép tải 1 ảnh",
+		})
+		return
+	}
+	// Lấy file từ request
+	file := files[0]
+	//Kiểm tra kích thước file upload
+	//if file.Size < MinSize || file.Size > MaxSize {
+	//	c.JSON(400, gin.H{"error": "File phải từ 1MB đến 5MB"})
+	//	return
+	//}
+
+	//Check valid file
+	if err := utils.ChechValidFile(file); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  http.StatusBadRequest,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	if err := utils.CheckValidMiMe(file); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  http.StatusBadRequest,
+			"message": err.Error(),
+		})
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	existedAccout, checkExisted := ac.accountCollection.Find(ctx, bson.M{
+		"_id": objectId,
+	})
+
+	if checkExisted != nil && errors.Is(checkExisted, mongo.ErrNoDocuments) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  http.StatusBadRequest,
+			"message": "Không tìm thấy người dùng upload",
+		})
+		return
+	}
+
+	cloudName := os.Getenv("CLOUD_NAME")
+	apiKey := os.Getenv("CLOUD_API_KEY")
+	apiSecret := os.Getenv("CLOUD_API_SECRET")
+
+	cld, err := cloudinary.NewFromParams(cloudName, apiKey, apiSecret)
+	if err != nil {
+		log.Fatalf("Failed to initialize Cloudinary: %v", err)
+	}
+
+	u := uuid.New().String()
+	ext := filepath.Ext(file.Filename)                   // lấy đuôi file
+	baseName := strings.TrimSuffix(file.Filename, ext)   // tên file gốc không có đuôi
+	fileName := fmt.Sprintf("%s_%s%s", baseName, u, ext) // Ví dụ: avatar_123e4567-e89b-12d3-a456-426614174000.jpg
+
+	openedFile, err := file.Open()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"status": 500, "message": "Không thể mở file"})
+		return
+	}
+	defer openedFile.Close()
+
+	//Check file upload đã tồn tại và xóa
+	if existedAccout.ImageUrl != "" {
+		_, err := cld.Upload.Destroy(ctx, uploader.DestroyParams{
+			PublicID: existedAccout.PublicUrlId,
+		})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"status":  500,
+				"message": "Xóa ảnh trên Cloudinary thất bại",
+			})
+			return
+		}
+	}
+
+	//Upload file
+	uploadResult, err := cld.Upload.Upload(ctx, openedFile, uploader.UploadParams{
+		Folder:   "upload", // folder lưu trên Cloudinary
+		PublicID: fileName, // đặt tên file = tên gốc + UUID
+	})
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"status": 500, "message": "Upload lên Cloudinary thất bại"})
+		return
+	}
+
+	// Lấy URL để lưu vào MongoDB
+	filePath := uploadResult.SecureURL
+	if err := ac.accountCollection.Update(ctx, bson.M{"_id": objectId}, bson.M{"$set": bson.M{
+		"image_url":     filePath,
+		"updated_at":    time.Now(),
+		"updated_by":    objectId,
+		"public_url_id": uploadResult.PublicID,
 	}}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  http.StatusInternalServerError,

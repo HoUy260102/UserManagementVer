@@ -41,6 +41,5 @@ func NewRedisClient() *redis.Client {
 	}
 
 	fmt.Println("Kết nối thành công!")
-	fmt.Println("Xin chào")
 	return client
 }
