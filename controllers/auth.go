@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -22,6 +23,10 @@ type AuthController struct {
 	accountCollection *collections.AccountCollection
 	emailService      *services.EmailService
 	jwtService        *services.JwtService
+}
+
+type RenewAcessTokenRequest struct {
+	RefreshToken string `json:"refresh_token"`
 }
 type LoginRequest struct {
 	Email    string `json:"email" validate:"required,email"`
@@ -285,4 +290,121 @@ func (auth *AuthController) ConfirmLogin(c *gin.Context) {
 			"message": "Từ chối đăng nhập",
 		})
 	}
+}
+
+func (authContro *AuthController) RenewAccessToken(c *gin.Context) {
+	var renewAccessTokenReq RenewAcessTokenRequest
+	if err := c.ShouldBindJSON(&renewAccessTokenReq); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  http.StatusBadRequest,
+			"message": err.Error(),
+		})
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, checkExist := authContro.sessionCollection.FindOne(ctx, bson.M{
+		"refresh_token": renewAccessTokenReq.RefreshToken,
+	})
+
+	if errors.Is(ctx.Err(), mongo.ErrNoDocuments) {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"status":  http.StatusUnauthorized,
+			"message": "Token không hợp lệ",
+		})
+		return
+	}
+
+	if checkExist != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status":  http.StatusInternalServerError,
+			"message": checkExist.Error(),
+		})
+		return
+	}
+	refreshTokenClaim, err := authContro.jwtService.ExtractCustomClaims(renewAccessTokenReq.RefreshToken)
+
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"status":  http.StatusUnauthorized,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	accessToken, _, err := authContro.jwtService.GenerateJwt(refreshTokenClaim.Email, configs.AppConfig.Jwt.JwtRefreshTokenExpirationTime, "access")
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status":  http.StatusInternalServerError,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, bson.M{
+		"status":    http.StatusOK,
+		"timestamp": time.Now(),
+		"message":   "Làm mới token thành công",
+		"data": bson.M{
+			"access_token": accessToken,
+		},
+	})
+}
+
+func (authContro *AuthController) Logout(c *gin.Context) {
+	deviceId := c.GetHeader("Device-Id")
+	authHeader := c.GetHeader("Authorization")
+	token := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+	if token == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  http.StatusBadRequest,
+			"message": "Token không thấy!",
+		})
+		return
+	}
+	tokenClaims, err := authContro.jwtService.ExtractCustomClaims(token)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"status":  http.StatusUnauthorized,
+			"message": err.Error(),
+		})
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	existedAccount, checkExisted := authContro.accountCollection.Find(ctx, bson.M{
+		"email": tokenClaims.Email,
+	})
+	if checkExisted != nil {
+		if errors.Is(checkExisted, mongo.ErrNoDocuments) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"status":  http.StatusNotFound,
+				"message": "Không tìm thấy account!",
+			})
+			return
+		}
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"status":  http.StatusUnauthorized,
+			"message": checkExisted.Error(),
+		})
+		return
+	}
+	err = authContro.sessionCollection.DeleteSession(ctx, bson.M{
+		"user_id":   existedAccount.Id,
+		"device_id": deviceId,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status":  http.StatusInternalServerError,
+			"message": err.Error(),
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"status":     http.StatusOK,
+		"timestamps": time.Now(),
+		"message":    "Logout thành công!",
+	})
 }

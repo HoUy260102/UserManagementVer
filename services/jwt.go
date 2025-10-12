@@ -29,7 +29,12 @@ type JwtCustomClaim struct {
 }
 
 func (j *JwtService) GenerateJwt(email string, duration int, typeToken string) (string, *JwtCustomClaim, error) {
-	tokenId, _ := uuid.NewRandom()
+	tokenId, err := uuid.NewRandom()
+
+	if err != nil {
+		return "", nil, err
+	}
+
 	claims := &JwtCustomClaim{
 		Email: email,
 		Type:  typeToken,
@@ -41,6 +46,7 @@ func (j *JwtService) GenerateJwt(email string, duration int, typeToken string) (
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
+
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tok, err := token.SignedString([]byte(j.SecretKey))
 	if err != nil {
@@ -51,8 +57,13 @@ func (j *JwtService) GenerateJwt(email string, duration int, typeToken string) (
 
 func (j *JwtService) ExtractCustomClaims(tokenStr string) (*JwtCustomClaim, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &JwtCustomClaim{}, func(token *jwt.Token) (interface{}, error) {
+		_, oke := token.Method.(*jwt.SigningMethodHMAC)
+		if !oke {
+			return nil, fmt.Errorf("JWT token đang xác thực có signing method không đúng")
+		}
 		return []byte(j.SecretKey), nil
 	})
+	
 	if err != nil {
 		return nil, err
 	}
@@ -71,6 +82,5 @@ func (j *JwtService) ValidateToken(tokenString string) (*jwt.Token, error) {
 		}
 		return []byte(j.SecretKey), nil
 	})
-
 	return token, err
 }

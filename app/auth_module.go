@@ -1,27 +1,32 @@
-package routers
+package app
 
 import (
 	"UserManagementVer/collections"
 	"UserManagementVer/configs"
 	"UserManagementVer/controllers"
-	"UserManagementVer/middlewares"
+	"UserManagementVer/routers"
 	"UserManagementVer/services"
 
-	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-func RegisterRouters(db *mongo.Database, v *gin.RouterGroup, rdb *redis.Client) {
+type AuthModule struct {
+	routers routers.Router
+}
+
+func NewAuthModule(db *mongo.Database, rdb *redis.Client) *AuthModule {
 	accountCollection := collections.NewAccountCollection(db.Collection("accounts"))
 	sessionCollection := collections.NewSessionCollection(db.Collection("sessions"))
 	emailService := services.NewEmailService(configs.AppConfig.Email.Host, configs.AppConfig.Email.User, configs.AppConfig.Email.Pass, configs.AppConfig.Email.Port)
 	jwtService := services.NewJwtService()
-	accountController := controllers.NewAccountController(accountCollection, jwtService)
 	authController := controllers.NewAuthController(sessionCollection, accountCollection, emailService, jwtService)
-	rateLimit := middlewares.NewRateLimitService(rdb)
-	authRouter := NewAuthRouter(authController)
-	accountRouter := NewAccountRouter(accountController)
-	accountRouter.RegisterRoutes(v, jwtService)
-	authRouter.Register(v, rateLimit)
+	authRouter := routers.NewAuthRouter(authController, rdb)
+	return &AuthModule{
+		routers: authRouter,
+	}
+}
+
+func (m *AuthModule) Routers() routers.Router {
+	return m.routers
 }

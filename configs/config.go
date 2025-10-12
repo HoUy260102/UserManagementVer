@@ -47,6 +47,7 @@ func LoadFileConfig() {
 	if err != nil {
 		log.Fatal("Lỗi đọc file", err)
 	}
+
 	//Thay biến môi trường trong file YAML bằng giá trị thực tế.
 	expandedYaml := os.ExpandEnv(string(data))
 	var cfg Config

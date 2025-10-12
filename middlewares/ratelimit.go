@@ -2,6 +2,7 @@ package middlewares
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -22,6 +23,8 @@ var (
 	rateLimitPrefix = "rate_limit_"
 	capacity        = 5 // max token
 	refill          = 1 * time.Second
+	window          = 2 * time.Second
+	maxRequest      = 5
 )
 
 func getClientIp(c *gin.Context) string {
@@ -55,6 +58,28 @@ func NewRateLimitService(rdb *redis.Client) *RateLimit {
 		ctx: context.Background(),
 		rdb: rdb,
 	}
+}
+
+func (rl *RateLimit) fixedWindow(c *gin.Context) bool {
+	ip := getClientIp(c)
+	key := rateLimitPrefix + ip
+	count, err := rl.rdb.Incr(rl.ctx, key).Result()
+	if err != nil {
+		log.Println("Lỗi khi tăng giá trị:", err)
+		return false
+	}
+
+	// Nếu count == 1 => key mới tạo, set TTL
+	if count == 1 {
+		err := rl.rdb.Expire(rl.ctx, key, window).Err()
+		if err != nil {
+			log.Println("Lỗi khi set thời gian sống:", err)
+		}
+	}
+	if count > int64(maxRequest) {
+		return false
+	}
+	return true
 }
 
 func (rl *RateLimit) rateLimit(c *gin.Context) bool {
@@ -104,7 +129,7 @@ func (rl *RateLimit) rateLimit(c *gin.Context) bool {
 
 func (rl *RateLimit) NewRateLimiterMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		check := rl.rateLimit(c)
+		check := rl.fixedWindow(c)
 		if !check {
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
 				"status":  http.StatusTooManyRequests,

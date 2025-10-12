@@ -1,12 +1,10 @@
 package main
 
 import (
+	"UserManagementVer/app"
 	configs "UserManagementVer/configs"
 	"UserManagementVer/db"
-	"UserManagementVer/routers"
 	"fmt"
-
-	"github.com/gin-gonic/gin"
 )
 
 //TIP <p>To run your code, right-click the code and select <b>Run</b>.</p> <p>Alternatively, click
@@ -14,10 +12,13 @@ import (
 
 func main() {
 	configs.LoadFileConfig()
+	//Connect db
 	Db := db.ConnectMongo(configs.AppConfig.Database.URI, configs.AppConfig.Database.Name)
-	rdb := configs.NewRedisClient()
-	r := gin.Default()
-	v1 := r.Group("/api/v1")
-	routers.RegisterRouters(Db, v1, rdb)
-	r.Run(fmt.Sprintf(":%d", configs.AppConfig.Server.Port))
+	//Connect redis
+	rdb := db.NewRedisClient()
+
+	application := app.NewApplication(configs.AppConfig, Db, rdb)
+	if err := application.Run(); err != nil {
+		fmt.Println(err)
+	}
 }
